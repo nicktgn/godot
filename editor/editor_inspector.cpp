@@ -29,12 +29,477 @@
 /*************************************************************************/
 
 #include "editor_inspector.h"
+#include "editor_properties.h"
+#include "editor_properties_array_dict.h"
 #include "array_property_edit.h"
 #include "dictionary_property_edit.h"
 #include "editor_node.h"
 #include "editor_scale.h"
 #include "multi_node_edit.h"
 #include "scene/resources/packed_scene.h"
+
+EditorProperty *EditorPropertyFactory::build_property(Object *p_object, Variant::Type p_type, const String &p_path, PropertyHint p_hint, const String &p_hint_text, int p_usage) const {
+
+	EditorProperty *ep = NULL;
+
+	switch (p_type) {
+
+		// atomic types
+		case Variant::NIL: {
+			ep = memnew(EditorPropertyNil);
+		} break;
+		case Variant::BOOL: {
+			ep = memnew(EditorPropertyCheck);
+		} break;
+		case Variant::INT: {
+
+			if (p_hint == PROPERTY_HINT_ENUM) {
+				EditorPropertyEnum *editor = memnew(EditorPropertyEnum);
+				Vector<String> options = p_hint_text.split(",");
+				editor->setup(options);
+				ep = editor;
+
+			} else if (p_hint == PROPERTY_HINT_FLAGS) {
+				EditorPropertyFlags *editor = memnew(EditorPropertyFlags);
+				Vector<String> options = p_hint_text.split(",");
+				editor->setup(options);
+				ep = editor;
+
+			} else if (p_hint == PROPERTY_HINT_LAYERS_2D_PHYSICS || p_hint == PROPERTY_HINT_LAYERS_2D_RENDER || p_hint == PROPERTY_HINT_LAYERS_3D_PHYSICS || p_hint == PROPERTY_HINT_LAYERS_3D_RENDER) {
+
+				EditorPropertyLayers::LayerType lt = EditorPropertyLayers::LAYER_RENDER_2D;
+				switch (p_hint) {
+					case PROPERTY_HINT_LAYERS_2D_RENDER:
+						lt = EditorPropertyLayers::LAYER_RENDER_2D;
+						break;
+					case PROPERTY_HINT_LAYERS_2D_PHYSICS:
+						lt = EditorPropertyLayers::LAYER_PHYSICS_2D;
+						break;
+					case PROPERTY_HINT_LAYERS_3D_RENDER:
+						lt = EditorPropertyLayers::LAYER_RENDER_3D;
+						break;
+					case PROPERTY_HINT_LAYERS_3D_PHYSICS:
+						lt = EditorPropertyLayers::LAYER_PHYSICS_3D;
+						break;
+					default: {} //compiler could be smarter here and realize this can't happen
+				}
+				EditorPropertyLayers *editor = memnew(EditorPropertyLayers);
+				editor->setup(lt);
+				ep = editor;
+			} else if (p_hint == PROPERTY_HINT_OBJECT_ID) {
+
+				EditorPropertyObjectID *editor = memnew(EditorPropertyObjectID);
+				editor->setup(p_hint_text);
+				ep = editor;
+			
+			} else {
+				EditorPropertyInteger *editor = memnew(EditorPropertyInteger);
+				int min = 0, max = 65535, step = 1;
+				bool greater = true, lesser = true;
+
+				if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+					greater = false; //if using ranged, assume false by default
+					lesser = false;
+					min = p_hint_text.get_slice(",", 0).to_int();
+					max = p_hint_text.get_slice(",", 1).to_int();
+
+					if (p_hint_text.get_slice_count(",") >= 3) {
+						step = p_hint_text.get_slice(",", 2).to_int();
+					}
+
+					for (int i = 2; i < p_hint_text.get_slice_count(","); i++) {
+						String slice = p_hint_text.get_slice(",", i).strip_edges();
+						if (slice == "or_greater") {
+							greater = true;
+						}
+						if (slice == "or_lesser") {
+							lesser = true;
+						}
+					}
+				}
+
+				editor->setup(min, max, step, greater, lesser);
+				ep = editor;
+			}
+		} break;
+		case Variant::REAL: {
+
+			if (p_hint == PROPERTY_HINT_EXP_EASING) {
+				EditorPropertyEasing *editor = memnew(EditorPropertyEasing);
+				bool full = true;
+				bool flip = false;
+				Vector<String> hints = p_hint_text.split(",");
+				for (int i = 0; i < hints.size(); i++) {
+					String h = hints[i].strip_edges();
+					if (h == "attenuation") {
+						flip = true;
+					}
+					if (h == "inout") {
+						full = true;
+					}
+				}
+
+				editor->setup(full, flip);
+				ep = editor;
+
+			} else {
+				EditorPropertyFloat *editor = memnew(EditorPropertyFloat);
+				double min = -65535, max = 65535, step = 0.001;
+				bool hide_slider = true;
+				bool exp_range = false;
+				bool greater = true, lesser = true;
+
+				if ((p_hint == PROPERTY_HINT_RANGE || p_hint == PROPERTY_HINT_EXP_RANGE) && p_hint_text.get_slice_count(",") >= 2) {
+					greater = false; //if using ranged, assume false by default
+					lesser = false;
+					min = p_hint_text.get_slice(",", 0).to_double();
+					max = p_hint_text.get_slice(",", 1).to_double();
+					if (p_hint_text.get_slice_count(",") >= 3) {
+						step = p_hint_text.get_slice(",", 2).to_double();
+					}
+					hide_slider = false;
+					exp_range = p_hint == PROPERTY_HINT_EXP_RANGE;
+					for (int i = 2; i < p_hint_text.get_slice_count(","); i++) {
+						String slice = p_hint_text.get_slice(",", i).strip_edges();
+						if (slice == "or_greater") {
+							greater = true;
+						}
+						if (slice == "or_lesser") {
+							lesser = true;
+						}
+					}
+				}
+
+				editor->setup(min, max, step, hide_slider, exp_range, greater, lesser);
+				ep = editor;
+			}
+		} break;
+		case Variant::STRING: {
+
+			if (p_hint == PROPERTY_HINT_ENUM) {
+				EditorPropertyTextEnum *editor = memnew(EditorPropertyTextEnum);
+				Vector<String> options = p_hint_text.split(",");
+				editor->setup(options);
+				ep = editor;
+			} else if (p_hint == PROPERTY_HINT_MULTILINE_TEXT) {
+				ep = memnew(EditorPropertyMultilineText);
+			} else if (p_hint == PROPERTY_HINT_TYPE_STRING) {
+				EditorPropertyClassName *editor = memnew(EditorPropertyClassName);
+				editor->setup("Object", p_hint_text);
+				ep = editor;
+			} else if (p_hint == PROPERTY_HINT_DIR || p_hint == PROPERTY_HINT_FILE || p_hint == PROPERTY_HINT_GLOBAL_DIR || p_hint == PROPERTY_HINT_GLOBAL_FILE) {
+
+				Vector<String> extensions = p_hint_text.split(",");
+				bool global = p_hint == PROPERTY_HINT_GLOBAL_DIR || p_hint == PROPERTY_HINT_GLOBAL_FILE;
+				bool folder = p_hint == PROPERTY_HINT_DIR || p_hint == PROPERTY_HINT_GLOBAL_DIR;
+				EditorPropertyPath *editor = memnew(EditorPropertyPath);
+				editor->setup(extensions, folder, global);
+				ep = editor;
+			} else if (p_hint == PROPERTY_HINT_METHOD_OF_VARIANT_TYPE ||
+					   p_hint == PROPERTY_HINT_METHOD_OF_BASE_TYPE ||
+					   p_hint == PROPERTY_HINT_METHOD_OF_INSTANCE ||
+					   p_hint == PROPERTY_HINT_METHOD_OF_SCRIPT ||
+					   p_hint == PROPERTY_HINT_PROPERTY_OF_VARIANT_TYPE ||
+					   p_hint == PROPERTY_HINT_PROPERTY_OF_BASE_TYPE ||
+					   p_hint == PROPERTY_HINT_PROPERTY_OF_INSTANCE ||
+					   p_hint == PROPERTY_HINT_PROPERTY_OF_SCRIPT) {
+
+				EditorPropertyMember *editor = memnew(EditorPropertyMember);
+
+				EditorPropertyMember::Type type = EditorPropertyMember::MEMBER_METHOD_OF_BASE_TYPE;
+				switch (p_hint) {
+					case PROPERTY_HINT_METHOD_OF_BASE_TYPE: type = EditorPropertyMember::MEMBER_METHOD_OF_BASE_TYPE; break;
+					case PROPERTY_HINT_METHOD_OF_INSTANCE: type = EditorPropertyMember::MEMBER_METHOD_OF_INSTANCE; break;
+					case PROPERTY_HINT_METHOD_OF_SCRIPT: type = EditorPropertyMember::MEMBER_METHOD_OF_SCRIPT; break;
+					case PROPERTY_HINT_PROPERTY_OF_VARIANT_TYPE: type = EditorPropertyMember::MEMBER_PROPERTY_OF_VARIANT_TYPE; break;
+					case PROPERTY_HINT_PROPERTY_OF_BASE_TYPE: type = EditorPropertyMember::MEMBER_PROPERTY_OF_BASE_TYPE; break;
+					case PROPERTY_HINT_PROPERTY_OF_INSTANCE: type = EditorPropertyMember::MEMBER_PROPERTY_OF_INSTANCE; break;
+					case PROPERTY_HINT_PROPERTY_OF_SCRIPT: type = EditorPropertyMember::MEMBER_PROPERTY_OF_SCRIPT; break;
+					default: {}
+				}
+				editor->setup(type, p_hint_text);
+				ep = editor;
+
+			} else {
+
+				EditorPropertyText *editor = memnew(EditorPropertyText);
+				if (p_hint == PROPERTY_HINT_PLACEHOLDER_TEXT) {
+					editor->set_placeholder(p_hint_text);
+				}
+				ep = editor;
+			}
+		} break;
+
+			// math types
+
+		case Variant::VECTOR2: {
+			EditorPropertyVector2 *editor = memnew(EditorPropertyVector2);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+
+		} break; // 5
+		case Variant::RECT2: {
+			
+			EditorPropertyRect2 *editor = memnew(EditorPropertyRect2);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+		} break;
+		case Variant::VECTOR3: {
+			
+			EditorPropertyVector3 *editor = memnew(EditorPropertyVector3);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+
+		} break;
+		case Variant::TRANSFORM2D: {
+			EditorPropertyTransform2D *editor = memnew(EditorPropertyTransform2D);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+
+		} break;
+		case Variant::PLANE: {
+			EditorPropertyPlane *editor = memnew(EditorPropertyPlane);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+		} break;
+		case Variant::QUAT: {
+			EditorPropertyQuat *editor = memnew(EditorPropertyQuat);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+		} break; // 10
+		case Variant::AABB: {
+			EditorPropertyAABB *editor = memnew(EditorPropertyAABB);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+		} break;
+		case Variant::BASIS: {
+			EditorPropertyBasis *editor = memnew(EditorPropertyBasis);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+		} break;
+		case Variant::TRANSFORM: {
+			EditorPropertyTransform *editor = memnew(EditorPropertyTransform);
+			double min = -65535, max = 65535, step = 0.001;
+			bool hide_slider = true;
+
+			if (p_hint == PROPERTY_HINT_RANGE && p_hint_text.get_slice_count(",") >= 2) {
+				min = p_hint_text.get_slice(",", 0).to_double();
+				max = p_hint_text.get_slice(",", 1).to_double();
+				if (p_hint_text.get_slice_count(",") >= 3) {
+					step = p_hint_text.get_slice(",", 2).to_double();
+				}
+				hide_slider = false;
+			}
+
+			editor->setup(min, max, step, hide_slider);
+			ep = editor;
+
+		} break;
+
+		// misc types
+		case Variant::COLOR: {
+			EditorPropertyColor *editor = memnew(EditorPropertyColor);
+			editor->setup(p_hint != PROPERTY_HINT_COLOR_NO_ALPHA);
+			ep = editor;
+
+		} break;
+		case Variant::NODE_PATH: {
+
+			EditorPropertyNodePath *editor = memnew(EditorPropertyNodePath);
+			if (p_hint == PROPERTY_HINT_NODE_PATH_TO_EDITED_NODE && p_hint_text != String()) {
+				editor->setup(p_hint_text, Vector<StringName>(), (p_usage & PROPERTY_USAGE_NODE_PATH_FROM_SCENE_ROOT));
+			}
+			if (p_hint == PROPERTY_HINT_NODE_PATH_VALID_TYPES && p_hint_text != String()) {
+				Vector<String> types = p_hint_text.split(",", false);
+				Vector<StringName> sn = Variant(types); //convert via variant
+				editor->setup(NodePath(), sn, (p_usage & PROPERTY_USAGE_NODE_PATH_FROM_SCENE_ROOT));
+			}
+			ep = editor;
+
+		} break; // 15
+		case Variant::_RID: {
+			ep = memnew(EditorPropertyRID);
+		} break;
+		case Variant::OBJECT: {
+			EditorPropertyResource *editor = memnew(EditorPropertyResource);
+			editor->setup(p_hint == PROPERTY_HINT_RESOURCE_TYPE ? p_hint_text : "Resource");
+
+			if (p_hint == PROPERTY_HINT_RESOURCE_TYPE) {
+				String open_in_new = EDITOR_GET("interface/inspector/resources_to_open_in_new_inspector");
+				for (int i = 0; i < open_in_new.get_slice_count(","); i++) {
+					String type = open_in_new.get_slicec(',', i).strip_edges();
+					for (int j = 0; j < p_hint_text.get_slice_count(","); j++) {
+						String inherits = p_hint_text.get_slicec(',', j);
+						if (ClassDB::is_parent_class(inherits, type)) {
+
+							editor->set_use_sub_inspector(false);
+						}
+					}
+				}
+			}
+			ep = editor;
+
+		} break;
+		case Variant::DICTIONARY: {
+			ep = memnew(EditorPropertyDictionary);
+		} break;
+		case Variant::ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::ARRAY, p_hint_text);
+			ep = editor;
+		} break;
+		case Variant::POOL_BYTE_ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::POOL_BYTE_ARRAY);
+			ep = editor;
+		} break; // 20
+		case Variant::POOL_INT_ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::POOL_INT_ARRAY);
+			ep = editor;
+		} break;
+		case Variant::POOL_REAL_ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::POOL_REAL_ARRAY);
+			ep = editor;
+		} break;
+		case Variant::POOL_STRING_ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::POOL_STRING_ARRAY);
+			ep = editor;
+		} break;
+		case Variant::POOL_VECTOR2_ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::POOL_VECTOR2_ARRAY);
+			ep = editor;
+		} break;
+		case Variant::POOL_VECTOR3_ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::POOL_VECTOR3_ARRAY);
+			ep = editor;
+		} break; // 25
+		case Variant::POOL_COLOR_ARRAY: {
+			EditorPropertyArray *editor = memnew(EditorPropertyArray);
+			editor->setup(Variant::POOL_COLOR_ARRAY);
+			ep = editor;
+		} break;
+		default: {}
+	}
+
+	if (ep == NULL) {
+		ep = memnew(EditorProperty);
+	}
+
+	//ep->object = p_object;
+	//ep->property = p_path;
+	//ep->property_usage = p_usage;
+
+	return ep;
+}
+
+void EditorPropertyFactory::_bind_methods() {
+
+	ClassDB::bind_method(D_METHOD("build_property", "object", "type", "path", "hint", "hint_text", "usage"), &EditorPropertyFactory::build_property);
+}
+
+////////////////////////////////////////////////
+////////////////////////////////////////////////
 
 Size2 EditorProperty::get_minimum_size() const {
 

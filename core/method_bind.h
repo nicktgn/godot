@@ -408,4 +408,7 @@ class __UnexistingClass;
 
 #include "method_bind.gen.inc"
 
+// To bind more then 6 parameters include this:
+#include "method_bind_ext.gen.inc"
+
 #endif

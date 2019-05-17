@@ -53,6 +53,7 @@ private:
 	String label;
 	int text_size;
 	friend class EditorInspector;
+	friend class EditorPropertyFactory;
 	Object *object;
 	StringName property;
 
@@ -102,6 +103,7 @@ protected:
 	void _gui_input(const Ref<InputEvent> &p_event);
 
 public:
+
 	void emit_changed(const StringName &p_property, const Variant &p_value, const StringName &p_field = StringName(), bool p_changing = false);
 
 	virtual Size2 get_minimum_size() const;
@@ -166,6 +168,17 @@ public:
 	EditorProperty();
 };
 
+class EditorPropertyFactory : public Reference {
+
+	GDCLASS(EditorPropertyFactory, Reference)
+
+protected:
+	static void _bind_methods();
+
+public:
+	virtual EditorProperty *build_property(Object *p_object, Variant::Type p_type, const String &p_path, PropertyHint p_hint, const String &p_hint_text, int p_usage) const;
+};
+ 
 class EditorInspectorPlugin : public Reference {
 	GDCLASS(EditorInspectorPlugin, Reference)
 
